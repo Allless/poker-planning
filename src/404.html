@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      // GitHub Pages SPA/clean-URL redirect
+      // If the path doesn't have an extension, try appending .html
+      const path = location.pathname;
+      if (!path.includes(".") && !path.endsWith("/")) {
+        location.replace(path + ".html" + location.search + location.hash);
+      }
+    </script>
+  </head>
+  <body></body>
+</html>
