@@ -20,7 +20,7 @@ export interface RoomSnapshot {
 export type RoomListener = (snapshot: RoomSnapshot) => void;
 
 const HEARTBEAT_INTERVAL = 5_000;
-const PRESENCE_TIMEOUT = 15_000;
+const PRESENCE_TIMEOUT = 90_000;
 const GRACE_PERIOD = 20_000;
 
 export class Room {
@@ -36,10 +36,13 @@ export class Room {
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private joinedAt: number;
   private beforeUnloadHandler: (() => void) | null = null;
+  private visibilityHandler: (() => void) | null = null;
+  private name: string;
   onStatus: ((status: string) => void) | null = null;
 
   constructor(roomId: string, name: string) {
     this.myId = getOrCreateIdentity();
+    this.name = name;
     this.joinedAt = Date.now();
     this.doc = new Y.Doc();
 
@@ -90,6 +93,16 @@ export class Room {
     if (typeof window !== "undefined") {
       this.beforeUnloadHandler = () => this.provider.publishLeave();
       window.addEventListener("beforeunload", this.beforeUnloadHandler);
+
+      this.visibilityHandler = () => {
+        if (document.visibilityState === "visible") {
+          // Tab woke up — re-add self in case peers removed us while throttled
+          this.participants.set(this.myId, { name: this.name });
+          this.provider.publishHeartbeat();
+          this.lastSeen.set(this.myId, Date.now());
+        }
+      };
+      document.addEventListener("visibilitychange", this.visibilityHandler);
     }
   }
 
@@ -146,8 +159,13 @@ export class Room {
   destroy(): void {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
-    if (this.beforeUnloadHandler && typeof window !== "undefined") {
-      window.removeEventListener("beforeunload", this.beforeUnloadHandler);
+    if (typeof window !== "undefined") {
+      if (this.beforeUnloadHandler) {
+        window.removeEventListener("beforeunload", this.beforeUnloadHandler);
+      }
+      if (this.visibilityHandler) {
+        document.removeEventListener("visibilitychange", this.visibilityHandler);
+      }
     }
     this.provider.publishLeave();
     this.participants.delete(this.myId);

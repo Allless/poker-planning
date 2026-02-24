@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { useState } from "preact/hooks";
 import { useRoom } from "./lib/useRoom";
-import { getSavedName, saveName, saveLastRoom } from "./lib/identity";
+import { getSavedName, saveName, saveLastRoom, ROOM_ID_PARAM } from "./lib/identity";
 import { TopBar } from "./components/TopBar";
 import { CardDeck } from "./components/CardDeck";
 import { ParticipantList } from "./components/ParticipantList";
@@ -9,7 +9,7 @@ import { ResultsPanel } from "./components/ResultsPanel";
 
 const getRoomId = (): string | null => {
   const params = new URLSearchParams(window.location.search);
-  return params.get("room");
+  return params.get(ROOM_ID_PARAM);
 };
 
 const RoomPage = ({ roomId, name }: { roomId: string; name: string }) => {

@@ -1,13 +1,16 @@
 import { render } from "preact";
 import { useState } from "preact/hooks";
-import { getLastRoom } from "./lib/identity";
+import { getLastRoom, ROOM_ID_PARAM } from "./lib/identity";
 
 const generateRoomId = (): string => {
   return crypto.randomUUID().slice(0, 8);
 };
 
 const navigateToRoom = (roomId: string) => {
-  window.location.href = `room?room=${roomId}`;
+  const base = import.meta.env.BASE_URL.endsWith("/") ? import.meta.env.BASE_URL : import.meta.env.BASE_URL + "/";
+  const url = new URL("room", new URL(base, window.location.origin));
+  url.searchParams.set(ROOM_ID_PARAM, roomId);
+  window.location.href = url.href;
 };
 
 const LandingPage = () => {
@@ -18,7 +21,7 @@ const LandingPage = () => {
     if (!roomId) return;
     try {
       const url = new URL(roomId);
-      roomId = url.searchParams.get("room") ?? roomId;
+      roomId = url.searchParams.get(ROOM_ID_PARAM) ?? roomId;
     } catch {
       // Not a URL, treat as room ID
     }

@@ -1,3 +1,5 @@
+export const ROOM_ID_PARAM = "id";
+
 const STORAGE_KEY = "poker-planning-id";
 const NAME_KEY = "poker-planning-name";
 
