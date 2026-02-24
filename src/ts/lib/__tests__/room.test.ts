@@ -11,6 +11,7 @@ vi.mock("../mqtt-provider", () => {
       onHeartbeat: ((peerId: string) => void) | null = null;
       onPeerLeave: ((peerId: string) => void) | null = null;
       onStatus: ((status: string) => void) | null = null;
+      onConnectionChange: ((connected: boolean) => void) | null = null;
     },
   };
 });

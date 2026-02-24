@@ -3,6 +3,7 @@ import mqtt from "mqtt";
 
 const REMOTE = "mqtt-remote";
 const BROKER_URL = "wss://broker.emqx.io:8084/mqtt";
+const MAX_RETRIES = 5;
 
 export type PeerCallback = (peerId: string) => void;
 export type StatusCallback = (status: string) => void;
@@ -12,6 +13,7 @@ export class MqttProvider {
   private topic: string;
   private connected = false;
   private participantId: string;
+  private retries = 0;
 
   onHeartbeat: PeerCallback | null = null;
   onPeerLeave: PeerCallback | null = null;
@@ -24,6 +26,7 @@ export class MqttProvider {
 
     this.client.on("connect", () => {
       this.connected = true;
+      this.retries = 0;
       this.onStatus?.("connected");
 
       this.client.subscribe(`${this.topic}/update`);
@@ -50,6 +53,12 @@ export class MqttProvider {
     });
 
     this.client.on("reconnect", () => {
+      this.retries++;
+      if (this.retries > MAX_RETRIES) {
+        this.client.end();
+        this.onStatus?.("failed");
+        return;
+      }
       this.onStatus?.("reconnecting");
     });
 

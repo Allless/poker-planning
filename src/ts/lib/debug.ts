@@ -9,9 +9,9 @@ export function attachRoomLogger(room: Room): () => void {
 
   log("room", "joined as %s — %d participant(s)", id, prev.participants.length);
 
-  room.onStatus = (status: string) => {
+  const unsubStatus = room.subscribeStatus((status: string) => {
     log("mqtt", status);
-  };
+  });
 
   const unsub = room.subscribe((snap: RoomSnapshot) => {
     const prevIds = new Map(prev.participants.map((p) => [p.id, p.name]));
@@ -53,7 +53,7 @@ export function attachRoomLogger(room: Room): () => void {
   });
 
   return () => {
-    room.onStatus = null;
+    unsubStatus();
     unsub();
   };
 }

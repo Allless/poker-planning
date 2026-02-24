@@ -17,7 +17,16 @@ export function useRoom(roomId: string, name: string) {
   useEffect(() => {
     const detachLogger = attachRoomLogger(room);
     const unsubscribe = room.subscribe(setSnapshot);
+    const unsubStatus = room.subscribeStatus((status) => {
+      if (status === "failed") {
+        const base = import.meta.env.BASE_URL.endsWith("/")
+          ? import.meta.env.BASE_URL
+          : import.meta.env.BASE_URL + "/";
+        window.location.href = new URL(".", new URL(base, window.location.origin)).href;
+      }
+    });
     return () => {
+      unsubStatus();
       detachLogger();
       unsubscribe();
       room.destroy();

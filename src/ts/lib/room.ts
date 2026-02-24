@@ -38,7 +38,7 @@ export class Room {
   private beforeUnloadHandler: (() => void) | null = null;
   private visibilityHandler: (() => void) | null = null;
   private name: string;
-  onStatus: ((status: string) => void) | null = null;
+  private statusListeners = new Set<(status: string) => void>();
 
   constructor(roomId: string, name: string) {
     this.myId = getOrCreateIdentity();
@@ -78,7 +78,7 @@ export class Room {
     };
 
     this.provider.onStatus = (status: string) => {
-      this.onStatus?.(status);
+      for (const listener of this.statusListeners) listener(status);
     };
 
     this.heartbeatTimer = setInterval(() => {
@@ -156,6 +156,11 @@ export class Room {
     return () => this.listeners.delete(listener);
   }
 
+  subscribeStatus(listener: (status: string) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
   destroy(): void {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
@@ -172,6 +177,7 @@ export class Room {
     this.provider.destroy();
     this.doc.destroy();
     this.listeners.clear();
+    this.statusListeners.clear();
   }
 
   private removePeer(peerId: string): void {
