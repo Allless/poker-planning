@@ -78,8 +78,8 @@ describe("MqttProvider", () => {
     const doc1 = new Y.Doc();
     const doc2 = new Y.Doc();
 
-    new MqttProvider(doc1, "test-room");
-    new MqttProvider(doc2, "test-room");
+    new MqttProvider(doc1, "test-room", "user-1");
+    new MqttProvider(doc2, "test-room", "user-2");
 
     // Wait for "connect" callbacks to fire
     await flush();
@@ -92,8 +92,8 @@ describe("MqttProvider", () => {
     const doc1 = new Y.Doc();
     const doc2 = new Y.Doc();
 
-    new MqttProvider(doc1, "test-room");
-    new MqttProvider(doc2, "test-room");
+    new MqttProvider(doc1, "test-room", "user-1");
+    new MqttProvider(doc2, "test-room", "user-2");
     await flush();
 
     doc1.getMap("votes").set("alice", "5");
@@ -105,7 +105,7 @@ describe("MqttProvider", () => {
 
   it("sends full state to late joiners via sync-request", async () => {
     const doc1 = new Y.Doc();
-    new MqttProvider(doc1, "test-room");
+    new MqttProvider(doc1, "test-room", "user-1");
     await flush();
 
     // Doc1 has existing state
@@ -114,7 +114,7 @@ describe("MqttProvider", () => {
 
     // Doc2 joins late — its connect triggers a sync-request
     const doc2 = new Y.Doc();
-    new MqttProvider(doc2, "test-room");
+    new MqttProvider(doc2, "test-room", "user-2");
     await flush();
 
     expect(doc2.getMap("votes").get("alice")).toBe("5");
@@ -125,8 +125,8 @@ describe("MqttProvider", () => {
     const doc1 = new Y.Doc();
     const doc2 = new Y.Doc();
 
-    new MqttProvider(doc1, "test-room");
-    new MqttProvider(doc2, "test-room");
+    new MqttProvider(doc1, "test-room", "user-1");
+    new MqttProvider(doc2, "test-room", "user-2");
     await flush();
 
     // Count publishes from doc1's client
@@ -148,7 +148,7 @@ describe("MqttProvider", () => {
 
   it("cleans up on destroy", async () => {
     const doc = new Y.Doc();
-    const provider = new MqttProvider(doc, "test-room");
+    const provider = new MqttProvider(doc, "test-room", "user-1");
     await flush();
 
     provider.destroy();

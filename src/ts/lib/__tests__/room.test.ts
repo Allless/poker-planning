@@ -6,6 +6,11 @@ vi.mock("../mqtt-provider", () => {
   return {
     MqttProvider: class {
       destroy = vi.fn();
+      publishHeartbeat = vi.fn();
+      publishLeave = vi.fn();
+      onHeartbeat: ((peerId: string) => void) | null = null;
+      onPeerLeave: ((peerId: string) => void) | null = null;
+      onStatus: ((status: string) => void) | null = null;
     },
   };
 });
