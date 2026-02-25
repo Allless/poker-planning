@@ -1,7 +1,8 @@
 import { Room, RoomSnapshot } from "./room";
 
-const log = (prefix: string, msg: string, ...args: unknown[]) =>
-  console.log(`[${prefix}] ${msg}`, ...args);
+const log = (prefix: string, msg: string, ...args: unknown[]) => {
+  if (import.meta.env.DEV) console.log(`[${prefix}] ${msg}`, ...args);
+};
 
 export function attachRoomLogger(room: Room): () => void {
   let prev = room.getSnapshot();
