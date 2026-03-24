@@ -1,12 +1,18 @@
 import { useState, useEffect, useRef } from "preact/hooks";
+import * as Y from "yjs";
 import { Room, RoomSnapshot } from "./room";
+import { MqttProvider } from "./mqtt-provider";
+import { getOrCreateIdentity } from "./identity";
 import { attachRoomLogger } from "./debug";
 
 export function useRoom(roomId: string, name: string) {
   const roomRef = useRef<Room | null>(null);
 
   if (!roomRef.current) {
-    roomRef.current = new Room(roomId, name);
+    const myId = getOrCreateIdentity();
+    const doc = new Y.Doc();
+    const provider = new MqttProvider(doc, roomId, myId);
+    roomRef.current = new Room(myId, name, provider, doc);
   }
   const room = roomRef.current;
 
@@ -18,7 +24,7 @@ export function useRoom(roomId: string, name: string) {
     const detachLogger = attachRoomLogger(room);
     const unsubscribe = room.subscribe(setSnapshot);
     const unsubStatus = room.subscribeStatus((status) => {
-      if (status === "failed") {
+      if (status.type === "failed") {
         const base = import.meta.env.BASE_URL.endsWith("/")
           ? import.meta.env.BASE_URL
           : import.meta.env.BASE_URL + "/";

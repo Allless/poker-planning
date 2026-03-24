@@ -1,33 +1,32 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as Y from "yjs";
+import { Room } from "../room";
+import type { RoomProvider, ConnectionStatus } from "../mqtt-provider";
 
-// Mock MQTT provider — requires network unavailable in Node
-vi.mock("../mqtt-provider", () => {
+function createStubProvider() {
   return {
-    MqttProvider: class {
-      destroy = vi.fn();
-      publishHeartbeat = vi.fn();
-      publishLeave = vi.fn();
-      onHeartbeat: ((peerId: string) => void) | null = null;
-      onPeerLeave: ((peerId: string) => void) | null = null;
-      onStatus: ((status: string) => void) | null = null;
-      onConnectionChange: ((connected: boolean) => void) | null = null;
-    },
-  };
+    onPeerLeave: null as RoomProvider["onPeerLeave"],
+    onPing: null as RoomProvider["onPing"],
+    onPong: null as RoomProvider["onPong"],
+    onStatus: null as RoomProvider["onStatus"],
+    publishPing: vi.fn<() => void>(),
+    publishPong: vi.fn<(name: string) => void>(),
+    publishLeave: vi.fn<() => void>(),
+    destroy: vi.fn<() => void>(),
+  } satisfies RoomProvider;
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
 });
 
-// Mock identity to return predictable IDs
-let mockId = "user-1";
-vi.mock("../identity", () => ({
-  getOrCreateIdentity: () => mockId,
-}));
-
-const { Room } = await import("../room");
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("Room", () => {
   it("registers the participant on construction", () => {
-    mockId = "user-1";
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     const snap = room.getSnapshot();
 
     expect(snap.myId).toBe("user-1");
@@ -35,7 +34,7 @@ describe("Room", () => {
   });
 
   it("initializes with voting phase and empty issue", () => {
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     const snap = room.getSnapshot();
 
     expect(snap.phase).toBe("voting");
@@ -43,14 +42,14 @@ describe("Room", () => {
   });
 
   it("vote() sets the current user's vote", () => {
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     room.vote("5");
 
     expect(room.getSnapshot().votes).toEqual({ "user-1": "5" });
   });
 
   it("vote() overwrites previous vote", () => {
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     room.vote("5");
     room.vote("8");
 
@@ -58,7 +57,7 @@ describe("Room", () => {
   });
 
   it("clearVote() removes the current user's vote", () => {
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     room.vote("5");
     room.clearVote();
 
@@ -66,15 +65,14 @@ describe("Room", () => {
   });
 
   it("reveal() sets phase to revealed", () => {
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     room.reveal();
 
     expect(room.getSnapshot().phase).toBe("revealed");
   });
 
   it("reset() clears all votes and sets phase to voting", () => {
-    mockId = "user-1";
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     room.vote("5");
     room.reveal();
     room.reset();
@@ -85,14 +83,14 @@ describe("Room", () => {
   });
 
   it("setIssue() updates the issue text", () => {
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     room.setIssue("Login bug");
 
     expect(room.getSnapshot().issue).toBe("Login bug");
   });
 
   it("subscribe() notifies on state changes", () => {
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     const snapshots: unknown[] = [];
     room.subscribe((snap) => snapshots.push(snap));
 
@@ -105,7 +103,7 @@ describe("Room", () => {
   });
 
   it("subscribe() returns an unsubscribe function", () => {
-    const room = new Room("test-room", "Alice");
+    const room = new Room("user-1", "Alice", createStubProvider());
     const snapshots: unknown[] = [];
     const unsub = room.subscribe((snap) => snapshots.push(snap));
 
@@ -115,13 +113,127 @@ describe("Room", () => {
     expect(snapshots).toEqual([]);
   });
 
-  it("destroy() removes participant", () => {
-    const room = new Room("test-room", "Alice");
-    expect(room.getSnapshot().participants).toHaveLength(1);
+  it("destroy() calls publishLeave and cleans up provider", () => {
+    const provider = createStubProvider();
+    const room = new Room("user-1", "Alice", provider);
 
     room.destroy();
-    // After destroy, the yjs doc is destroyed so we can't read state,
-    // but we verify no error is thrown
+
+    expect(provider.publishLeave).toHaveBeenCalled();
+    expect(provider.destroy).toHaveBeenCalled();
+  });
+});
+
+describe("peer leave", () => {
+  it("removes peer and their vote on leave", () => {
+    const provider = createStubProvider();
+    const room = new Room("user-1", "Alice", provider);
+
+    // Add peer via pong
+    provider.onPong!("peer-2", "Bob");
+    expect(room.getSnapshot().participants).toHaveLength(2);
+
+    provider.onPeerLeave!("peer-2");
+    expect(
+      room.getSnapshot().participants.find((p) => p.id === "peer-2"),
+    ).toBeUndefined();
+  });
+
+  it("does not remove self on own leave message", () => {
+    const provider = createStubProvider();
+    const room = new Room("user-1", "Alice", provider);
+
+    provider.onPeerLeave!("user-1");
+    expect(room.getSnapshot().participants).toEqual([
+      { id: "user-1", name: "Alice" },
+    ]);
+  });
+});
+
+describe("roll call", () => {
+  it("sends ping on connect", () => {
+    const provider = createStubProvider();
+    new Room("user-1", "Alice", provider);
+
+    provider.onStatus!({ type: "connected" });
+
+    expect(provider.publishPing).toHaveBeenCalled();
+  });
+
+  it("responds with pong including name when pinged", () => {
+    const provider = createStubProvider();
+    new Room("user-1", "Alice", provider);
+
+    provider.onPing!("peer-2");
+
+    expect(provider.publishPong).toHaveBeenCalledWith("Alice");
+  });
+
+  it("removes ghost participants after roll call timeout", () => {
+    const provider = createStubProvider();
+    const room = new Room("user-1", "Alice", provider);
+
+    // Add a peer
+    provider.onPong!("peer-2", "Bob");
+    expect(room.getSnapshot().participants).toHaveLength(2);
+
+    // Trigger roll call — peer-2 does NOT respond
+    provider.onStatus!({ type: "connected" });
+    vi.advanceTimersByTime(5_000);
+
+    expect(room.getSnapshot().participants).toEqual([
+      { id: "user-1", name: "Alice" },
+    ]);
+  });
+
+  it("keeps participants who respond to roll call", () => {
+    const provider = createStubProvider();
+    const room = new Room("user-1", "Alice", provider);
+
+    provider.onPong!("peer-2", "Bob");
+    expect(room.getSnapshot().participants).toHaveLength(2);
+
+    // Trigger roll call — peer-2 responds
+    provider.onStatus!({ type: "connected" });
+    provider.onPong!("peer-2", "Bob");
+    vi.advanceTimersByTime(5_000);
+
+    expect(room.getSnapshot().participants).toHaveLength(2);
+    expect(
+      room.getSnapshot().participants.find((p) => p.id === "peer-2"),
+    ).toEqual({ id: "peer-2", name: "Bob" });
+  });
+
+  it("adds unknown peer who responds with pong", () => {
+    const provider = createStubProvider();
+    const room = new Room("user-1", "Alice", provider);
+
+    expect(room.getSnapshot().participants).toHaveLength(1);
+
+    provider.onPong!("peer-3", "Charlie");
+
+    expect(room.getSnapshot().participants).toHaveLength(2);
+    expect(
+      room.getSnapshot().participants.find((p) => p.id === "peer-3"),
+    ).toEqual({ id: "peer-3", name: "Charlie" });
+  });
+
+  it("forwards status to subscribeStatus listeners", () => {
+    const provider = createStubProvider();
+    const room = new Room("user-1", "Alice", provider);
+
+    const statuses: ConnectionStatus[] = [];
+    room.subscribeStatus((s) => statuses.push(s));
+
+    provider.onStatus!({ type: "connected" });
+    provider.onStatus!({ type: "disconnected" });
+    provider.onStatus!({ type: "error", message: "timeout" });
+
+    expect(statuses).toEqual([
+      { type: "connected" },
+      { type: "disconnected" },
+      { type: "error", message: "timeout" },
+    ]);
   });
 });
 
@@ -168,7 +280,7 @@ describe("yjs state sync", () => {
     expect(participants2.get("user-1")).toEqual({ name: "Alice" });
   });
 
-  it("handles phase reveal and reset across peers", () => {
+  it("two rooms sharing a synced doc see each other", () => {
     const doc1 = new Y.Doc();
     const doc2 = new Y.Doc();
 
@@ -179,35 +291,16 @@ describe("yjs state sync", () => {
       Y.applyUpdate(doc1, update);
     });
 
-    const meta1 = doc1.getMap<string>("meta");
-    const meta2 = doc2.getMap<string>("meta");
+    const room1 = new Room("user-1", "Alice", createStubProvider(), doc1);
+    const room2 = new Room("user-2", "Bob", createStubProvider(), doc2);
 
-    meta1.set("phase", "voting");
-    expect(meta2.get("phase")).toBe("voting");
+    expect(room1.getSnapshot().participants).toHaveLength(2);
+    expect(room2.getSnapshot().participants).toHaveLength(2);
 
-    meta2.set("phase", "revealed");
-    expect(meta1.get("phase")).toBe("revealed");
+    room1.vote("5");
+    expect(room2.getSnapshot().votes["user-1"]).toBe("5");
 
-    meta1.set("phase", "voting");
-    expect(meta2.get("phase")).toBe("voting");
-  });
-
-  it("late joiner receives existing state", () => {
-    const doc1 = new Y.Doc();
-
-    doc1.getMap<string>("votes").set("user-1", "5");
-    doc1.getMap<{ name: string }>("participants").set("user-1", {
-      name: "Alice",
-    });
-
-    const doc2 = new Y.Doc();
-    Y.applyUpdate(doc2, Y.encodeStateAsUpdate(doc1));
-
-    expect(doc2.getMap<string>("votes").get("user-1")).toBe("5");
-    expect(doc2.getMap<{ name: string }>("participants").get("user-1")).toEqual(
-      {
-        name: "Alice",
-      },
-    );
+    room2.vote("8");
+    expect(room1.getSnapshot().votes["user-2"]).toBe("8");
   });
 });
