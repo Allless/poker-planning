@@ -139,7 +139,8 @@ describe("peer leave", () => {
     doc.getMap<{ name: string; lastSeen: number }>("participants").set("peer-2", { name: "Bob", lastSeen: Date.now() });
     doc.getMap<string>("votes").set("peer-2", "5");
 
-    provider.onPeerLeave!("peer-2");
+    expect(provider.onPeerLeave).not.toBeNull();
+    provider.onPeerLeave?.("peer-2");
     expect(
       room1.getSnapshot().participants.find((p) => p.id === "peer-2"),
     ).toBeUndefined();
@@ -150,7 +151,7 @@ describe("peer leave", () => {
     const provider = createStubProvider();
     const room = new Room("user-1", "Alice", provider);
 
-    provider.onPeerLeave!("user-1");
+    provider.onPeerLeave?.("user-1");
     expect(room.getSnapshot().participants).toEqual([
       { id: "user-1", name: "Alice" },
     ]);
@@ -256,9 +257,9 @@ describe("inactivity and kick", () => {
     const statuses: ConnectionStatus[] = [];
     room.subscribeStatus((s) => statuses.push(s));
 
-    provider.onStatus!({ type: "connected" });
-    provider.onStatus!({ type: "disconnected" });
-    provider.onStatus!({ type: "error", message: "timeout" });
+    provider.onStatus?.({ type: "connected" });
+    provider.onStatus?.({ type: "disconnected" });
+    provider.onStatus?.({ type: "error", message: "timeout" });
 
     expect(statuses).toEqual([
       { type: "connected" },
