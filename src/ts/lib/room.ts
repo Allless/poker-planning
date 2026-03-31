@@ -13,6 +13,7 @@ export interface Participant {
 export interface RoomSnapshot {
   participants: Participant[];
   votes: Record<string, string>;
+  inactive: Set<string>;
   phase: Phase;
   issue: string;
   myId: string;
@@ -20,21 +21,24 @@ export interface RoomSnapshot {
 
 export type RoomListener = (snapshot: RoomSnapshot) => void;
 
-const ROLL_CALL_TIMEOUT = 5_000;
+const HEARTBEAT_INTERVAL = 10_000;
+const INACTIVE_THRESHOLD = 2 * 60_000; // 2 minutes
 
 export class Room {
   readonly myId: string;
   private doc: Y.Doc;
   private provider: RoomProvider;
   private votes: Y.Map<string>;
-  private participants: Y.Map<{ name: string }>;
+  private participants: Y.Map<{ name: string; lastSeen: number }>;
   private meta: Y.Map<string>;
   private listeners = new Set<RoomListener>();
   private beforeUnloadHandler: (() => void) | null = null;
   private visibilityHandler: (() => void) | null = null;
   private name: string;
-  private rollCallTimer: ReturnType<typeof setTimeout> | null = null;
-  private rollCallResponders = new Set<string>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private inactiveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private inactivePeers = new Set<string>();
+  private destroyed = false;
   private statusListeners = new Set<(status: ConnectionStatus) => void>();
 
   constructor(myId: string, name: string, provider: RoomProvider, doc?: Y.Doc) {
@@ -44,10 +48,10 @@ export class Room {
     this.provider = provider;
 
     this.votes = this.doc.getMap<string>("votes");
-    this.participants = this.doc.getMap<{ name: string }>("participants");
+    this.participants = this.doc.getMap<{ name: string; lastSeen: number }>("participants");
     this.meta = this.doc.getMap<string>("meta");
 
-    this.participants.set(this.myId, { name });
+    this.participants.set(this.myId, { name, lastSeen: Date.now() });
 
     if (!this.meta.has("phase")) {
       this.meta.set("phase", "voting");
@@ -58,28 +62,29 @@ export class Room {
 
     const notify = () => this.notifyListeners();
     this.votes.observe(notify);
-    this.participants.observe(notify);
+    this.participants.observe(() => {
+      if (!this.destroyed && !this.participants.has(this.myId)) {
+        this.participants.set(this.myId, { name: this.name, lastSeen: Date.now() });
+        return;
+      }
+      this.participants.forEach((value, peerId) => {
+        if (peerId !== this.myId) this.scheduleInactiveCheck(peerId, value.lastSeen);
+      });
+      notify();
+    });
     this.meta.observe(notify);
 
     this.provider.onPeerLeave = (peerId: string) => {
       if (peerId !== this.myId) this.removePeer(peerId);
     };
 
-    this.provider.onPing = (_peerId: string) => {
-      this.provider.publishPong(this.name);
-    };
-
-    this.provider.onPong = (peerId: string, peerName: string) => {
-      this.rollCallResponders.add(peerId);
-      if (!this.participants.has(peerId)) {
-        this.participants.set(peerId, { name: peerName });
-      }
-    };
-
     this.provider.onStatus = (status: ConnectionStatus) => {
-      if (status.type === "connected") this.startRollCall();
       for (const listener of this.statusListeners) listener(status);
     };
+
+    this.heartbeatTimer = setInterval(() => {
+      this.participants.set(this.myId, { name: this.name, lastSeen: Date.now() });
+    }, HEARTBEAT_INTERVAL);
 
     if (typeof window !== "undefined") {
       this.beforeUnloadHandler = () => this.provider.publishLeave();
@@ -87,8 +92,7 @@ export class Room {
 
       this.visibilityHandler = () => {
         if (document.visibilityState === "visible") {
-          this.participants.set(this.myId, { name: this.name });
-          this.startRollCall();
+          this.participants.set(this.myId, { name: this.name, lastSeen: Date.now() });
         }
       };
       document.addEventListener("visibilitychange", this.visibilityHandler);
@@ -97,7 +101,7 @@ export class Room {
 
   getSnapshot(): RoomSnapshot {
     const participants: Participant[] = [];
-    this.participants.forEach((value: { name: string }, key: string) => {
+    this.participants.forEach((value, key) => {
       participants.push({ id: key, name: value.name });
     });
 
@@ -109,6 +113,7 @@ export class Room {
     return {
       participants,
       votes,
+      inactive: new Set(this.inactivePeers),
       phase: (this.meta.get("phase") as Phase) ?? "voting",
       issue: this.meta.get("issue") ?? "",
       myId: this.myId,
@@ -150,8 +155,16 @@ export class Room {
     return () => this.statusListeners.delete(listener);
   }
 
+  kick(peerId: string): void {
+    if (peerId === this.myId) return;
+    this.removePeer(peerId);
+  }
+
   destroy(): void {
-    if (this.rollCallTimer) clearTimeout(this.rollCallTimer);
+    this.destroyed = true;
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    for (const timer of this.inactiveTimers.values()) clearTimeout(timer);
+    this.inactiveTimers.clear();
     if (typeof window !== "undefined") {
       if (this.beforeUnloadHandler) {
         window.removeEventListener("beforeunload", this.beforeUnloadHandler);
@@ -168,27 +181,36 @@ export class Room {
     this.statusListeners.clear();
   }
 
-  private startRollCall(): void {
-    if (this.rollCallTimer) clearTimeout(this.rollCallTimer);
-    this.rollCallResponders.clear();
-    this.rollCallResponders.add(this.myId);
-    this.provider.publishPing();
-
-    this.rollCallTimer = setTimeout(() => {
-      this.participants.forEach((_value: { name: string }, peerId: string) => {
-        if (!this.rollCallResponders.has(peerId)) {
-          this.removePeer(peerId);
-        }
-      });
-      this.rollCallTimer = null;
-    }, ROLL_CALL_TIMEOUT);
-  }
-
   private removePeer(peerId: string): void {
+    const timer = this.inactiveTimers.get(peerId);
+    if (timer) clearTimeout(timer);
+    this.inactiveTimers.delete(peerId);
+    this.inactivePeers.delete(peerId);
     this.doc.transact(() => {
       if (this.participants.has(peerId)) this.participants.delete(peerId);
       if (this.votes.has(peerId)) this.votes.delete(peerId);
     });
+  }
+
+  private scheduleInactiveCheck(peerId: string, lastSeen: number): void {
+    const existing = this.inactiveTimers.get(peerId);
+    if (existing) clearTimeout(existing);
+
+    const remaining = INACTIVE_THRESHOLD - (Date.now() - lastSeen);
+    if (remaining <= 0) {
+      this.inactivePeers.add(peerId);
+      return;
+    }
+
+    this.inactivePeers.delete(peerId);
+    this.inactiveTimers.set(
+      peerId,
+      setTimeout(() => {
+        this.inactiveTimers.delete(peerId);
+        this.inactivePeers.add(peerId);
+        this.notifyListeners();
+      }, remaining),
+    );
   }
 
   private notifyListeners(): void {

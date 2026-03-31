@@ -15,11 +15,7 @@ export type ConnectionStatus =
 
 export interface RoomProvider {
   onPeerLeave: ((peerId: string) => void) | null;
-  onPing: ((peerId: string) => void) | null;
-  onPong: ((peerId: string, name: string) => void) | null;
   onStatus: ((status: ConnectionStatus) => void) | null;
-  publishPing(): void;
-  publishPong(name: string): void;
   publishLeave(): void;
   destroy(): void;
 }
@@ -32,8 +28,6 @@ export class MqttProvider implements RoomProvider {
   private retries = 0;
 
   onPeerLeave: ((peerId: string) => void) | null = null;
-  onPing: ((peerId: string) => void) | null = null;
-  onPong: ((peerId: string, name: string) => void) | null = null;
   onStatus: ((status: ConnectionStatus) => void) | null = null;
 
   constructor(doc: Y.Doc, roomId: string, participantId: string) {
@@ -50,8 +44,6 @@ export class MqttProvider implements RoomProvider {
       this.client.subscribe(`${this.topic}/sync-request`);
       this.client.subscribe(`${this.topic}/sync-response`);
       this.client.subscribe(`${this.topic}/leave`);
-      this.client.subscribe(`${this.topic}/ping`);
-      this.client.subscribe(`${this.topic}/pong`);
 
       // Request full state from any existing peer
       this.client.publish(`${this.topic}/sync-request`, "");
@@ -95,15 +87,6 @@ export class MqttProvider implements RoomProvider {
       } else if (_topic === `${this.topic}/leave`) {
         const peerId = new TextDecoder().decode(message);
         if (peerId) this.onPeerLeave?.(peerId);
-      } else if (_topic === `${this.topic}/ping`) {
-        const peerId = new TextDecoder().decode(message);
-        if (peerId) this.onPing?.(peerId);
-      } else if (_topic === `${this.topic}/pong`) {
-        const payload = new TextDecoder().decode(message);
-        const sep = payload.indexOf(":");
-        if (sep > 0) {
-          this.onPong?.(payload.slice(0, sep), payload.slice(sep + 1));
-        }
       }
     });
 
@@ -113,16 +96,6 @@ export class MqttProvider implements RoomProvider {
       if (!this.connected) return;
       this.client.publish(`${this.topic}/update`, update as unknown as string);
     });
-  }
-
-  publishPing(): void {
-    if (!this.connected) return;
-    this.client.publish(`${this.topic}/ping`, this.participantId);
-  }
-
-  publishPong(name: string): void {
-    if (!this.connected) return;
-    this.client.publish(`${this.topic}/pong`, `${this.participantId}:${name}`);
   }
 
   publishLeave(): void {

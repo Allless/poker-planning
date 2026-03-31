@@ -6,11 +6,7 @@ import type { RoomProvider, ConnectionStatus } from "../mqtt-provider";
 function createStubProvider() {
   return {
     onPeerLeave: null as RoomProvider["onPeerLeave"],
-    onPing: null as RoomProvider["onPing"],
-    onPong: null as RoomProvider["onPong"],
     onStatus: null as RoomProvider["onStatus"],
-    publishPing: vi.fn<() => void>(),
-    publishPong: vi.fn<(name: string) => void>(),
     publishLeave: vi.fn<() => void>(),
     destroy: vi.fn<() => void>(),
   } satisfies RoomProvider;
@@ -126,17 +122,28 @@ describe("Room", () => {
 
 describe("peer leave", () => {
   it("removes peer and their vote on leave", () => {
-    const provider = createStubProvider();
-    const room = new Room("user-1", "Alice", provider);
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+    doc1.on("update", (u: Uint8Array) => Y.applyUpdate(doc2, u));
+    doc2.on("update", (u: Uint8Array) => Y.applyUpdate(doc1, u));
 
-    // Add peer via pong
-    provider.onPong!("peer-2", "Bob");
+    const room = new Room("user-1", "Alice", createStubProvider(), doc1);
+    new Room("peer-2", "Bob", createStubProvider(), doc2);
     expect(room.getSnapshot().participants).toHaveLength(2);
+
+    const provider = createStubProvider();
+    const room1 = new Room("user-1", "Alice", provider);
+
+    // Simulate peer joining via shared doc
+    const doc = (room1 as unknown as { doc: Y.Doc }).doc;
+    doc.getMap<{ name: string; lastSeen: number }>("participants").set("peer-2", { name: "Bob", lastSeen: Date.now() });
+    doc.getMap<string>("votes").set("peer-2", "5");
 
     provider.onPeerLeave!("peer-2");
     expect(
-      room.getSnapshot().participants.find((p) => p.id === "peer-2"),
+      room1.getSnapshot().participants.find((p) => p.id === "peer-2"),
     ).toBeUndefined();
+    expect(room1.getSnapshot().votes["peer-2"]).toBeUndefined();
   });
 
   it("does not remove self on own leave message", () => {
@@ -150,72 +157,96 @@ describe("peer leave", () => {
   });
 });
 
-describe("roll call", () => {
-  it("sends ping on connect", () => {
-    const provider = createStubProvider();
-    new Room("user-1", "Alice", provider);
+describe("inactivity and kick", () => {
+  it("marks peer as inactive after threshold", () => {
+    const room = new Room("user-1", "Alice", createStubProvider());
 
-    provider.onStatus!({ type: "connected" });
+    const doc = (room as unknown as { doc: Y.Doc }).doc;
+    doc.getMap<{ name: string; lastSeen: number }>("participants").set("peer-2", { name: "Bob", lastSeen: Date.now() });
 
-    expect(provider.publishPing).toHaveBeenCalled();
+    expect(room.getSnapshot().inactive.has("peer-2")).toBe(false);
+
+    vi.advanceTimersByTime(2 * 60_000);
+
+    expect(room.getSnapshot().inactive.has("peer-2")).toBe(true);
   });
 
-  it("responds with pong including name when pinged", () => {
-    const provider = createStubProvider();
-    new Room("user-1", "Alice", provider);
+  it("clears inactive when peer heartbeat arrives", () => {
+    const room = new Room("user-1", "Alice", createStubProvider());
 
-    provider.onPing!("peer-2");
+    const doc = (room as unknown as { doc: Y.Doc }).doc;
+    const participants = doc.getMap<{ name: string; lastSeen: number }>("participants");
+    participants.set("peer-2", { name: "Bob", lastSeen: Date.now() });
 
-    expect(provider.publishPong).toHaveBeenCalledWith("Alice");
+    vi.advanceTimersByTime(2 * 60_000);
+    expect(room.getSnapshot().inactive.has("peer-2")).toBe(true);
+
+    participants.set("peer-2", { name: "Bob", lastSeen: Date.now() });
+    expect(room.getSnapshot().inactive.has("peer-2")).toBe(false);
   });
 
-  it("removes ghost participants after roll call timeout", () => {
+  it("kick() removes a peer and their vote", () => {
     const provider = createStubProvider();
     const room = new Room("user-1", "Alice", provider);
 
-    // Add a peer
-    provider.onPong!("peer-2", "Bob");
-    expect(room.getSnapshot().participants).toHaveLength(2);
+    const doc = (room as unknown as { doc: Y.Doc }).doc;
+    doc.getMap<{ name: string; lastSeen: number }>("participants").set("peer-2", { name: "Bob", lastSeen: Date.now() - 300_000 });
+    doc.getMap<string>("votes").set("peer-2", "5");
 
-    // Trigger roll call — peer-2 does NOT respond
-    provider.onStatus!({ type: "connected" });
-    vi.advanceTimersByTime(5_000);
+    room.kick("peer-2");
 
-    expect(room.getSnapshot().participants).toEqual([
-      { id: "user-1", name: "Alice" },
-    ]);
+    const snap = room.getSnapshot();
+    expect(snap.participants.find((p) => p.id === "peer-2")).toBeUndefined();
+    expect(snap.votes["peer-2"]).toBeUndefined();
+    expect(snap.inactive.has("peer-2")).toBe(false);
   });
 
-  it("keeps participants who respond to roll call", () => {
-    const provider = createStubProvider();
-    const room = new Room("user-1", "Alice", provider);
+  it("kick() does not remove self", () => {
+    const room = new Room("user-1", "Alice", createStubProvider());
+    room.kick("user-1");
 
-    provider.onPong!("peer-2", "Bob");
-    expect(room.getSnapshot().participants).toHaveLength(2);
+    expect(room.getSnapshot().participants).toHaveLength(1);
+  });
 
-    // Trigger roll call — peer-2 responds
-    provider.onStatus!({ type: "connected" });
-    provider.onPong!("peer-2", "Bob");
-    vi.advanceTimersByTime(5_000);
+  it("connected peer re-adds itself after being kicked", () => {
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+    doc1.on("update", (u: Uint8Array) => Y.applyUpdate(doc2, u));
+    doc2.on("update", (u: Uint8Array) => Y.applyUpdate(doc1, u));
 
-    expect(room.getSnapshot().participants).toHaveLength(2);
+    const room1 = new Room("user-1", "Alice", createStubProvider(), doc1);
+    new Room("peer-2", "Bob", createStubProvider(), doc2);
+
+    expect(room1.getSnapshot().participants).toHaveLength(2);
+
+    room1.kick("peer-2");
+
+    // peer-2's Room is still alive, so it re-adds itself
     expect(
-      room.getSnapshot().participants.find((p) => p.id === "peer-2"),
+      room1.getSnapshot().participants.find((p) => p.id === "peer-2"),
     ).toEqual({ id: "peer-2", name: "Bob" });
   });
 
-  it("adds unknown peer who responds with pong", () => {
-    const provider = createStubProvider();
-    const room = new Room("user-1", "Alice", provider);
+  it("disconnected peer stays removed after being kicked", () => {
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+    doc1.on("update", (u: Uint8Array) => Y.applyUpdate(doc2, u));
+    doc2.on("update", (u: Uint8Array) => Y.applyUpdate(doc1, u));
 
-    expect(room.getSnapshot().participants).toHaveLength(1);
+    const room1 = new Room("user-1", "Alice", createStubProvider(), doc1);
+    const room2 = new Room("peer-2", "Bob", createStubProvider(), doc2);
 
-    provider.onPong!("peer-3", "Charlie");
+    expect(room1.getSnapshot().participants).toHaveLength(2);
 
-    expect(room.getSnapshot().participants).toHaveLength(2);
+    // peer-2 disconnects (destroys their room)
+    room2.destroy();
+
+    room1.kick("peer-2");
+
+    // peer-2 is gone, nobody re-adds
     expect(
-      room.getSnapshot().participants.find((p) => p.id === "peer-3"),
-    ).toEqual({ id: "peer-3", name: "Charlie" });
+      room1.getSnapshot().participants.find((p) => p.id === "peer-2"),
+    ).toBeUndefined();
   });
 
   it("forwards status to subscribeStatus listeners", () => {

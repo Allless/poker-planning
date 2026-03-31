@@ -49,8 +49,10 @@ const RoomPage = ({ roomId, name }: { roomId: string; name: string }) => {
       <ParticipantList
         participants={snapshot.participants}
         votes={snapshot.votes}
+        inactive={snapshot.inactive}
         phase={snapshot.phase}
         myId={snapshot.myId}
+        onKick={(peerId) => room.kick(peerId)}
       />
 
       {snapshot.phase === "revealed" && <ResultsPanel votes={snapshot.votes} />}

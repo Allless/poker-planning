@@ -269,6 +269,32 @@ body {
   font-size: 0.875rem;
 }
 
+.participant--inactive {
+  opacity: 0.5;
+}
+
+.participant__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.participant__kick {
+  background: none;
+  border: 1px solid var(--color-text-muted);
+  color: var(--color-text-muted);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.1rem 0.4rem;
+}
+
+.participant__kick:hover {
+  color: var(--color-danger, #e74c3c);
+  border-color: var(--color-danger, #e74c3c);
+}
+
 .participant__vote {
   font-size: 1.125rem;
 }
