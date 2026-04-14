@@ -1,5 +1,6 @@
 import * as Y from "yjs";
 import type { RoomProvider, ConnectionStatus } from "./mqtt-provider";
+import type { RoomSettings } from "./identity";
 
 export type { ConnectionStatus };
 
@@ -16,6 +17,7 @@ export interface RoomSnapshot {
   inactive: Set<string>;
   phase: Phase;
   issue: string;
+  autoReveal: boolean;
   myId: string;
 }
 
@@ -41,7 +43,7 @@ export class Room {
   private destroyed = false;
   private statusListeners = new Set<(status: ConnectionStatus) => void>();
 
-  constructor(myId: string, name: string, provider: RoomProvider, doc?: Y.Doc) {
+  constructor(myId: string, name: string, provider: RoomProvider, doc?: Y.Doc, settings?: RoomSettings) {
     this.myId = myId;
     this.name = name;
     this.doc = doc ?? new Y.Doc();
@@ -59,9 +61,14 @@ export class Room {
     if (!this.meta.has("issue")) {
       this.meta.set("issue", "");
     }
+    if (!this.meta.has("autoReveal")) {
+      this.meta.set("autoReveal", settings?.autoReveal ? "true" : "false");
+    }
 
-    const notify = () => this.notifyListeners();
-    this.votes.observe(notify);
+    this.votes.observe(() => {
+      this.revealIfAllVoted();
+      this.notifyStateListeners();
+    });
     this.participants.observe(() => {
       if (!this.destroyed && !this.participants.has(this.myId)) {
         this.participants.set(this.myId, { name: this.name, lastSeen: Date.now() });
@@ -70,9 +77,9 @@ export class Room {
       this.participants.forEach((value, peerId) => {
         if (peerId !== this.myId) this.scheduleInactiveCheck(peerId, value.lastSeen);
       });
-      notify();
+      this.notifyStateListeners();
     });
-    this.meta.observe(notify);
+    this.meta.observe(() => this.notifyStateListeners());
 
     this.provider.onPeerLeave = (peerId: string) => {
       if (peerId !== this.myId) this.removePeer(peerId);
@@ -116,6 +123,7 @@ export class Room {
       inactive: new Set(this.inactivePeers),
       phase: (this.meta.get("phase") as Phase) ?? "voting",
       issue: this.meta.get("issue") ?? "",
+      autoReveal: this.meta.get("autoReveal") === "true",
       myId: this.myId,
     };
   }
@@ -139,6 +147,11 @@ export class Room {
       });
       this.meta.set("phase", "voting");
     });
+  }
+
+  setAutoReveal(on: boolean): void {
+    this.meta.set("autoReveal", on ? "true" : "false");
+    if (on) this.revealIfAllVoted();
   }
 
   setIssue(text: string): void {
@@ -208,12 +221,25 @@ export class Room {
       setTimeout(() => {
         this.inactiveTimers.delete(peerId);
         this.inactivePeers.add(peerId);
-        this.notifyListeners();
+        this.notifyStateListeners();
       }, remaining),
     );
   }
 
-  private notifyListeners(): void {
+  private revealIfAllVoted(): void {
+    if (this.meta.get("autoReveal") !== "true") return;
+    if ((this.meta.get("phase") as Phase) !== "voting") return;
+    if (this.participants.size === 0) return;
+
+    let allVoted = true;
+    this.participants.forEach((_, id) => {
+      if (!this.votes.has(id)) allVoted = false;
+    });
+
+    if (allVoted) this.reveal();
+  }
+
+  private notifyStateListeners(): void {
     const snapshot = this.getSnapshot();
     for (const listener of this.listeners) {
       listener(snapshot);

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import * as Y from "yjs";
 import { Room, RoomSnapshot } from "./room";
 import { MqttProvider } from "./mqtt-provider";
-import { getOrCreateIdentity } from "./identity";
+import { getOrCreateIdentity, getSavedSettings } from "./identity";
 import { attachRoomLogger } from "./debug";
 
 export function useRoom(roomId: string, name: string) {
@@ -12,7 +12,7 @@ export function useRoom(roomId: string, name: string) {
     const myId = getOrCreateIdentity();
     const doc = new Y.Doc();
     const provider = new MqttProvider(doc, roomId, myId);
-    roomRef.current = new Room(myId, name, provider, doc);
+    roomRef.current = new Room(myId, name, provider, doc, getSavedSettings());
   }
   const room = roomRef.current;
 

@@ -269,6 +269,102 @@ describe("inactivity and kick", () => {
   });
 });
 
+describe("auto-reveal", () => {
+  it("auto-reveals when all active participants have voted", () => {
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+    doc1.on("update", (u: Uint8Array) => Y.applyUpdate(doc2, u));
+    doc2.on("update", (u: Uint8Array) => Y.applyUpdate(doc1, u));
+
+    const room1 = new Room("user-1", "Alice", createStubProvider(), doc1);
+    new Room("user-2", "Bob", createStubProvider(), doc2);
+
+    room1.setAutoReveal(true);
+    expect(room1.getSnapshot().phase).toBe("voting");
+
+    room1.vote("5");
+    // Bob hasn't voted yet
+    expect(room1.getSnapshot().phase).toBe("voting");
+
+    // Bob votes via doc2
+    doc2.getMap<string>("votes").set("user-2", "8");
+    expect(room1.getSnapshot().phase).toBe("revealed");
+  });
+
+  it("does not auto-reveal when autoReveal is off", () => {
+    const room = new Room("user-1", "Alice", createStubProvider());
+    room.vote("5");
+
+    expect(room.getSnapshot().phase).toBe("voting");
+  });
+
+  it("does not auto-reveal when someone has not voted", () => {
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+    doc1.on("update", (u: Uint8Array) => Y.applyUpdate(doc2, u));
+    doc2.on("update", (u: Uint8Array) => Y.applyUpdate(doc1, u));
+
+    const room1 = new Room("user-1", "Alice", createStubProvider(), doc1);
+    new Room("user-2", "Bob", createStubProvider(), doc2);
+
+    room1.setAutoReveal(true);
+    room1.vote("5");
+
+    expect(room1.getSnapshot().phase).toBe("voting");
+  });
+
+  it("does not auto-reveal when inactive peer has not voted", () => {
+    const room = new Room("user-1", "Alice", createStubProvider());
+    room.setAutoReveal(true);
+
+    const doc = (room as unknown as { doc: Y.Doc }).doc;
+    doc.getMap<{ name: string; lastSeen: number }>("participants").set("peer-2", { name: "Bob", lastSeen: Date.now() });
+
+    vi.advanceTimersByTime(2 * 60_000);
+    expect(room.getSnapshot().inactive.has("peer-2")).toBe(true);
+
+    // user-1 votes but peer-2 (inactive) has not — should not auto-reveal
+    room.vote("5");
+    expect(room.getSnapshot().phase).toBe("voting");
+  });
+
+  it("autoReveal setting is synced between peers", () => {
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+    doc1.on("update", (u: Uint8Array) => Y.applyUpdate(doc2, u));
+    doc2.on("update", (u: Uint8Array) => Y.applyUpdate(doc1, u));
+
+    const room1 = new Room("user-1", "Alice", createStubProvider(), doc1);
+    const room2 = new Room("user-2", "Bob", createStubProvider(), doc2);
+
+    expect(room2.getSnapshot().autoReveal).toBe(false);
+    room1.setAutoReveal(true);
+    expect(room2.getSnapshot().autoReveal).toBe(true);
+  });
+
+  it("snapshot includes autoReveal field defaulting to false", () => {
+    const room = new Room("user-1", "Alice", createStubProvider());
+    expect(room.getSnapshot().autoReveal).toBe(false);
+  });
+
+  it("auto-reveals when toggled on and everyone has already voted", () => {
+    const doc1 = new Y.Doc();
+    const doc2 = new Y.Doc();
+    doc1.on("update", (u: Uint8Array) => Y.applyUpdate(doc2, u));
+    doc2.on("update", (u: Uint8Array) => Y.applyUpdate(doc1, u));
+
+    const room1 = new Room("user-1", "Alice", createStubProvider(), doc1);
+    const room2 = new Room("user-2", "Bob", createStubProvider(), doc2);
+
+    room1.vote("5");
+    room2.vote("8");
+    expect(room1.getSnapshot().phase).toBe("voting");
+
+    room1.setAutoReveal(true);
+    expect(room1.getSnapshot().phase).toBe("revealed");
+  });
+});
+
 describe("yjs state sync", () => {
   it("syncs votes between two docs", () => {
     const doc1 = new Y.Doc();

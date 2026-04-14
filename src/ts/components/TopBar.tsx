@@ -2,9 +2,11 @@ import { useState } from "preact/hooks";
 
 interface TopBarProps {
   roomId: string;
+  autoReveal: boolean;
+  onAutoRevealChange: (on: boolean) => void;
 }
 
-export const TopBar = ({ roomId }: TopBarProps) => {
+export const TopBar = ({ roomId, autoReveal, onAutoRevealChange }: TopBarProps) => {
   const [copied, setCopied] = useState(false);
 
   const copyLink = () => {
@@ -23,6 +25,17 @@ export const TopBar = ({ roomId }: TopBarProps) => {
           {copied ? "Copied!" : "Copy link"}
         </button>
       </div>
+      <label class="toggle">
+        <input
+          type="checkbox"
+          role="switch"
+          class="toggle__input"
+          checked={autoReveal}
+          onChange={(e) => onAutoRevealChange(e.currentTarget.checked)}
+        />
+        <span class="toggle__track" />
+        <span class="toggle__label">Auto-reveal</span>
+      </label>
     </div>
   );
 };

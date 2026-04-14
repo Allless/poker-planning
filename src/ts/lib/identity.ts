@@ -24,6 +24,28 @@ export function saveName(name: string): void {
   localStorage.setItem(NAME_KEY, name);
 }
 
+const SETTINGS_KEY = "poker-planning-settings";
+
+export interface RoomSettings {
+  autoReveal: boolean;
+}
+
+const DEFAULT_SETTINGS: RoomSettings = { autoReveal: false };
+
+export function getSavedSettings(): RoomSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+export function saveSettings(settings: RoomSettings): void {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
 const LAST_ROOM_KEY = "poker-planning-last-room";
 
 export function getLastRoom(): string {
