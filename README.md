@@ -25,10 +25,10 @@ State is synced between all participants via MQTT pub/sub. Yjs handles conflict 
 ## Development
 
 ```sh
-npm install
-npm run dev        # dev server on localhost:5173
-npm test           # run tests
-npm run build      # production build to dist/
+pnpm install
+pnpm dev           # dev server on localhost:5173
+pnpm test          # run tests
+pnpm build         # production build to dist/
 ```
 
 ## TODO
