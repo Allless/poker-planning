@@ -37,7 +37,7 @@ const RoomPage = ({ roomId, name }: { roomId: string; name: string }) => {
         roomId={roomId}
         autoReveal={snapshot.autoReveal}
         status={status}
-        onReconnect={() => room.reconnect()}
+        onReconnect={() => room.reconnect(true)}
         onAutoRevealChange={(on) => {
           room.setAutoReveal(on);
           saveSettings({ ...getSavedSettings(), autoReveal: on });

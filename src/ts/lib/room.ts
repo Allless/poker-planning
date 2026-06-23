@@ -130,8 +130,8 @@ export class Room {
     }
   }
 
-  reconnect(): void {
-    this.provider.reconnect();
+  reconnect(force = false): void {
+    this.provider.reconnect(force);
   }
 
   getSnapshot(): RoomSnapshot {

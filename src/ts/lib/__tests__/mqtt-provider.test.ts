@@ -175,6 +175,21 @@ describe("MqttProvider", () => {
     expect(provider.isConnected()).toBe(true);
   });
 
+  it("reconnect(true) forces a rebuild even while connected", async () => {
+    const doc = new Y.Doc();
+    const provider = new MqttProvider(doc, "test-room", "user-1");
+    await flush();
+    expect(provider.isConnected()).toBe(true);
+
+    // The manual button forces a fresh client despite the "connected" status.
+    provider.reconnect(true);
+    expect(clients[0].ended).toBe(true);
+    expect(clients).toHaveLength(2);
+
+    await flush();
+    expect(provider.isConnected()).toBe(true);
+  });
+
   it("gives up after MAX_RETRIES but stays recoverable", async () => {
     const doc = new Y.Doc();
     const provider = new MqttProvider(doc, "test-room", "user-1");

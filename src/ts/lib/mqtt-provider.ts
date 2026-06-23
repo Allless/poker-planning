@@ -17,7 +17,7 @@ export interface RoomProvider {
   onPeerLeave: ((peerId: string) => void) | null;
   onStatus: ((status: ConnectionStatus) => void) | null;
   publishLeave(): void;
-  reconnect(): void;
+  reconnect(force?: boolean): void;
   isConnected(): boolean;
   destroy(): void;
 }
@@ -123,11 +123,17 @@ export class MqttProvider implements RoomProvider {
    * Re-establish the connection in place, preserving the Yjs doc. Used after a
    * long sleep/background where the socket died and mqtt.js gave up. Rebuilds
    * a fresh client rather than relying on reconnect-after-end semantics.
+   *
+   * Automatic triggers (tab focus, network online) pass force=false and skip
+   * when already connected. The manual button passes force=true to rebuild
+   * even when the status claims "connected" — covering a silently dead socket
+   * that mqtt.js hasn't noticed yet.
    */
-  reconnect(): void {
+  reconnect(force = false): void {
     if (this.destroyed) return;
-    if (this.connected) return;
+    if (this.connected && !force) return;
 
+    this.connected = false;
     this.client.removeAllListeners();
     this.client.end(true);
     this.onStatus?.({ type: "reconnecting" });

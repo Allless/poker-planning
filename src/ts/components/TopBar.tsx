@@ -56,11 +56,7 @@ export const TopBar = ({
           <span class="conn__dot" />
           <span class="conn__label">{conn.label}</span>
         </div>
-        <button
-          class="btn btn--small"
-          onClick={onReconnect}
-          disabled={status.type === "connected"}
-        >
+        <button class="btn btn--small" onClick={onReconnect}>
           Reconnect
         </button>
         <label class="toggle">

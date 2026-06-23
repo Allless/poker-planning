@@ -8,7 +8,7 @@ function createStubProvider() {
     onPeerLeave: null as RoomProvider["onPeerLeave"],
     onStatus: null as RoomProvider["onStatus"],
     publishLeave: vi.fn<() => void>(),
-    reconnect: vi.fn<() => void>(),
+    reconnect: vi.fn<(force?: boolean) => void>(),
     isConnected: vi.fn<() => boolean>(() => true),
     destroy: vi.fn<() => void>(),
   } satisfies RoomProvider;
@@ -111,13 +111,15 @@ describe("Room", () => {
     expect(snapshots).toEqual([]);
   });
 
-  it("reconnect() delegates to the provider", () => {
+  it("reconnect() forwards the force flag to the provider", () => {
     const provider = createStubProvider();
     const room = new Room("user-1", "Alice", provider);
 
-    room.reconnect();
+    room.reconnect(true);
+    expect(provider.reconnect).toHaveBeenCalledWith(true);
 
-    expect(provider.reconnect).toHaveBeenCalled();
+    room.reconnect();
+    expect(provider.reconnect).toHaveBeenCalledWith(false);
   });
 
   it("destroy() calls publishLeave and cleans up provider", () => {
