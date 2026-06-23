@@ -16,6 +16,8 @@
   --color-text-muted: #94a3b8;
   --color-border: #334155;
   --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
   --radius: 8px;
   --radius-lg: 12px;
 }
@@ -246,6 +248,43 @@ body {
 .top-bar__issue {
   flex: 1;
   min-width: 200px;
+}
+
+.top-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.conn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.conn__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.conn--online .conn__dot {
+  background: var(--color-success);
+}
+
+.conn--pending .conn__dot {
+  background: var(--color-warning);
+}
+
+.conn--offline .conn__dot {
+  background: var(--color-danger);
+}
+
+.conn--offline .conn__label {
+  color: var(--color-danger);
 }
 
 /* Card Deck */

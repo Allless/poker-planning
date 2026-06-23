@@ -8,6 +8,8 @@ function createStubProvider() {
     onPeerLeave: null as RoomProvider["onPeerLeave"],
     onStatus: null as RoomProvider["onStatus"],
     publishLeave: vi.fn<() => void>(),
+    reconnect: vi.fn<() => void>(),
+    isConnected: vi.fn<() => boolean>(() => true),
     destroy: vi.fn<() => void>(),
   } satisfies RoomProvider;
 }
@@ -109,6 +111,15 @@ describe("Room", () => {
     expect(snapshots).toEqual([]);
   });
 
+  it("reconnect() delegates to the provider", () => {
+    const provider = createStubProvider();
+    const room = new Room("user-1", "Alice", provider);
+
+    room.reconnect();
+
+    expect(provider.reconnect).toHaveBeenCalled();
+  });
+
   it("destroy() calls publishLeave and cleans up provider", () => {
     const provider = createStubProvider();
     const room = new Room("user-1", "Alice", provider);
@@ -136,7 +147,9 @@ describe("peer leave", () => {
 
     // Simulate peer joining via shared doc
     const doc = (room1 as unknown as { doc: Y.Doc }).doc;
-    doc.getMap<{ name: string; lastSeen: number }>("participants").set("peer-2", { name: "Bob", lastSeen: Date.now() });
+    doc
+      .getMap<{ name: string; lastSeen: number }>("participants")
+      .set("peer-2", { name: "Bob", lastSeen: Date.now() });
     doc.getMap<string>("votes").set("peer-2", "5");
 
     expect(provider.onPeerLeave).not.toBeNull();
@@ -163,7 +176,9 @@ describe("inactivity and kick", () => {
     const room = new Room("user-1", "Alice", createStubProvider());
 
     const doc = (room as unknown as { doc: Y.Doc }).doc;
-    doc.getMap<{ name: string; lastSeen: number }>("participants").set("peer-2", { name: "Bob", lastSeen: Date.now() });
+    doc
+      .getMap<{ name: string; lastSeen: number }>("participants")
+      .set("peer-2", { name: "Bob", lastSeen: Date.now() });
 
     expect(room.getSnapshot().inactive.has("peer-2")).toBe(false);
 
@@ -176,7 +191,9 @@ describe("inactivity and kick", () => {
     const room = new Room("user-1", "Alice", createStubProvider());
 
     const doc = (room as unknown as { doc: Y.Doc }).doc;
-    const participants = doc.getMap<{ name: string; lastSeen: number }>("participants");
+    const participants = doc.getMap<{ name: string; lastSeen: number }>(
+      "participants",
+    );
     participants.set("peer-2", { name: "Bob", lastSeen: Date.now() });
 
     vi.advanceTimersByTime(2 * 60_000);
@@ -191,7 +208,9 @@ describe("inactivity and kick", () => {
     const room = new Room("user-1", "Alice", provider);
 
     const doc = (room as unknown as { doc: Y.Doc }).doc;
-    doc.getMap<{ name: string; lastSeen: number }>("participants").set("peer-2", { name: "Bob", lastSeen: Date.now() - 300_000 });
+    doc
+      .getMap<{ name: string; lastSeen: number }>("participants")
+      .set("peer-2", { name: "Bob", lastSeen: Date.now() - 300_000 });
     doc.getMap<string>("votes").set("peer-2", "5");
 
     room.kick("peer-2");
@@ -318,7 +337,9 @@ describe("auto-reveal", () => {
     room.setAutoReveal(true);
 
     const doc = (room as unknown as { doc: Y.Doc }).doc;
-    doc.getMap<{ name: string; lastSeen: number }>("participants").set("peer-2", { name: "Bob", lastSeen: Date.now() });
+    doc
+      .getMap<{ name: string; lastSeen: number }>("participants")
+      .set("peer-2", { name: "Bob", lastSeen: Date.now() });
 
     vi.advanceTimersByTime(2 * 60_000);
     expect(room.getSnapshot().inactive.has("peer-2")).toBe(true);

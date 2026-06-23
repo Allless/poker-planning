@@ -1,13 +1,40 @@
 import { useState } from "preact/hooks";
+import type { ConnectionStatus } from "../lib/mqtt-provider";
 
 interface TopBarProps {
   roomId: string;
   autoReveal: boolean;
+  status: ConnectionStatus;
   onAutoRevealChange: (on: boolean) => void;
+  onReconnect: () => void;
 }
 
-export const TopBar = ({ roomId, autoReveal, onAutoRevealChange }: TopBarProps) => {
+interface ConnState {
+  label: string;
+  modifier: "online" | "pending" | "offline";
+  canReconnect: boolean;
+}
+
+const connState = (status: ConnectionStatus): ConnState => {
+  switch (status.type) {
+    case "connected":
+      return { label: "Connected", modifier: "online", canReconnect: false };
+    case "reconnecting":
+      return { label: "Connecting…", modifier: "pending", canReconnect: false };
+    default:
+      return { label: "Offline", modifier: "offline", canReconnect: true };
+  }
+};
+
+export const TopBar = ({
+  roomId,
+  autoReveal,
+  status,
+  onAutoRevealChange,
+  onReconnect,
+}: TopBarProps) => {
   const [copied, setCopied] = useState(false);
+  const conn = connState(status);
 
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href).then(() => {
@@ -25,17 +52,28 @@ export const TopBar = ({ roomId, autoReveal, onAutoRevealChange }: TopBarProps) 
           {copied ? "Copied!" : "Copy link"}
         </button>
       </div>
-      <label class="toggle">
-        <input
-          type="checkbox"
-          role="switch"
-          class="toggle__input"
-          checked={autoReveal}
-          onChange={(e) => onAutoRevealChange(e.currentTarget.checked)}
-        />
-        <span class="toggle__track" />
-        <span class="toggle__label">Auto-reveal</span>
-      </label>
+      <div class="top-bar__right">
+        <div class={`conn conn--${conn.modifier}`}>
+          <span class="conn__dot" />
+          <span class="conn__label">{conn.label}</span>
+          {conn.canReconnect && (
+            <button class="btn btn--small" onClick={onReconnect}>
+              Reconnect
+            </button>
+          )}
+        </div>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            role="switch"
+            class="toggle__input"
+            checked={autoReveal}
+            onChange={(e) => onAutoRevealChange(e.currentTarget.checked)}
+          />
+          <span class="toggle__track" />
+          <span class="toggle__label">Auto-reveal</span>
+        </label>
+      </div>
     </div>
   );
 };

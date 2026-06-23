@@ -8,6 +8,7 @@ interface MockClient {
   subscriptions: Set<string>;
   onMessage: MessageHandler | null;
   onConnect: (() => void) | null;
+  handlers: Record<string, (...args: unknown[]) => void>;
   ended: boolean;
 }
 
@@ -18,6 +19,7 @@ const createMockClient = (): MockClient => {
     subscriptions: new Set(),
     onMessage: null,
     onConnect: null,
+    handlers: {},
     ended: false,
   };
   clients.push(client);
@@ -35,6 +37,7 @@ vi.mock("mqtt", () => ({
 
       const api = {
         on: (event: string, cb: (...args: unknown[]) => void) => {
+          client.handlers[event] = cb;
           if (event === "connect") {
             client.onConnect = cb as () => void;
             // Simulate async connect
@@ -60,6 +63,10 @@ vi.mock("mqtt", () => ({
         },
         end: () => {
           client.ended = true;
+        },
+        removeAllListeners: () => {
+          client.onMessage = null;
+          client.onConnect = null;
         },
       };
 
@@ -153,5 +160,71 @@ describe("MqttProvider", () => {
 
     provider.destroy();
     expect(clients[0].ended).toBe(true);
+  });
+
+  it("reconnect() is a no-op while connected", async () => {
+    const doc = new Y.Doc();
+    const provider = new MqttProvider(doc, "test-room", "user-1");
+    await flush();
+
+    expect(provider.isConnected()).toBe(true);
+    provider.reconnect();
+
+    // No new client was built
+    expect(clients).toHaveLength(1);
+    expect(provider.isConnected()).toBe(true);
+  });
+
+  it("gives up after MAX_RETRIES but stays recoverable", async () => {
+    const doc = new Y.Doc();
+    const provider = new MqttProvider(doc, "test-room", "user-1");
+    const statuses: string[] = [];
+    provider.onStatus = (s) => statuses.push(s.type);
+    await flush();
+    expect(provider.isConnected()).toBe(true);
+
+    // Simulate the broker being unreachable: connect never fires again, only
+    // reconnect attempts. MAX_RETRIES is 5, so the 6th gives up.
+    const client = clients[0];
+    for (let i = 0; i < 6; i++) client.handlers.reconnect?.();
+
+    expect(statuses.filter((s) => s === "reconnecting")).toHaveLength(5);
+    expect(statuses).toContain("failed");
+    expect(client.ended).toBe(true);
+    expect(provider.isConnected()).toBe(false);
+
+    // Crucially, the provider is NOT permanently dead: reconnect() rebuilds.
+    provider.reconnect();
+    expect(clients).toHaveLength(2);
+    await flush();
+    expect(provider.isConnected()).toBe(true);
+  });
+
+  it("reconnect() rebuilds the client after going offline and re-syncs", async () => {
+    // Existing peer holds room state
+    const peerDoc = new Y.Doc();
+    new MqttProvider(peerDoc, "test-room", "peer");
+    await flush();
+    peerDoc.getMap("votes").set("peer", "5");
+
+    const doc = new Y.Doc();
+    const provider = new MqttProvider(doc, "test-room", "user-1");
+    await flush();
+    expect(provider.isConnected()).toBe(true);
+
+    // Socket dies while backgrounded
+    clients[1].handlers.offline?.();
+    expect(provider.isConnected()).toBe(false);
+
+    // The dead client is torn down and a fresh one is built
+    const before = clients.length;
+    provider.reconnect();
+    expect(clients[1].ended).toBe(true);
+    expect(clients.length).toBe(before + 1);
+
+    // New client connects and pulls current state via sync-request
+    await flush();
+    expect(provider.isConnected()).toBe(true);
+    expect(doc.getMap("votes").get("peer")).toBe("5");
   });
 });

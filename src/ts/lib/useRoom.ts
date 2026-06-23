@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import * as Y from "yjs";
 import { Room, RoomSnapshot } from "./room";
-import { MqttProvider } from "./mqtt-provider";
+import { MqttProvider, ConnectionStatus } from "./mqtt-provider";
 import { getOrCreateIdentity, getSavedSettings } from "./identity";
 import { attachRoomLogger } from "./debug";
 
@@ -19,18 +19,14 @@ export function useRoom(roomId: string, name: string) {
   const [snapshot, setSnapshot] = useState<RoomSnapshot>(() =>
     room.getSnapshot(),
   );
+  const [status, setStatus] = useState<ConnectionStatus>({
+    type: "reconnecting",
+  });
 
   useEffect(() => {
     const detachLogger = attachRoomLogger(room);
     const unsubscribe = room.subscribe(setSnapshot);
-    const unsubStatus = room.subscribeStatus((status) => {
-      if (status.type === "failed") {
-        const base = import.meta.env.BASE_URL.endsWith("/")
-          ? import.meta.env.BASE_URL
-          : import.meta.env.BASE_URL + "/";
-        window.location.href = new URL(".", new URL(base, window.location.origin)).href;
-      }
-    });
+    const unsubStatus = room.subscribeStatus(setStatus);
     return () => {
       unsubStatus();
       detachLogger();
@@ -40,5 +36,5 @@ export function useRoom(roomId: string, name: string) {
     };
   }, [room]);
 
-  return { snapshot, room };
+  return { snapshot, status, room };
 }

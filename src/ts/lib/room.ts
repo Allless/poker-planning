@@ -36,6 +36,7 @@ export class Room {
   private listeners = new Set<RoomListener>();
   private beforeUnloadHandler: (() => void) | null = null;
   private visibilityHandler: (() => void) | null = null;
+  private onlineHandler: (() => void) | null = null;
   private name: string;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private inactiveTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -43,14 +44,22 @@ export class Room {
   private destroyed = false;
   private statusListeners = new Set<(status: ConnectionStatus) => void>();
 
-  constructor(myId: string, name: string, provider: RoomProvider, doc?: Y.Doc, settings?: RoomSettings) {
+  constructor(
+    myId: string,
+    name: string,
+    provider: RoomProvider,
+    doc?: Y.Doc,
+    settings?: RoomSettings,
+  ) {
     this.myId = myId;
     this.name = name;
     this.doc = doc ?? new Y.Doc();
     this.provider = provider;
 
     this.votes = this.doc.getMap<string>("votes");
-    this.participants = this.doc.getMap<{ name: string; lastSeen: number }>("participants");
+    this.participants = this.doc.getMap<{ name: string; lastSeen: number }>(
+      "participants",
+    );
     this.meta = this.doc.getMap<string>("meta");
 
     this.participants.set(this.myId, { name, lastSeen: Date.now() });
@@ -71,11 +80,15 @@ export class Room {
     });
     this.participants.observe(() => {
       if (!this.destroyed && !this.participants.has(this.myId)) {
-        this.participants.set(this.myId, { name: this.name, lastSeen: Date.now() });
+        this.participants.set(this.myId, {
+          name: this.name,
+          lastSeen: Date.now(),
+        });
         return;
       }
       this.participants.forEach((value, peerId) => {
-        if (peerId !== this.myId) this.scheduleInactiveCheck(peerId, value.lastSeen);
+        if (peerId !== this.myId)
+          this.scheduleInactiveCheck(peerId, value.lastSeen);
       });
       this.notifyStateListeners();
     });
@@ -90,7 +103,10 @@ export class Room {
     };
 
     this.heartbeatTimer = setInterval(() => {
-      this.participants.set(this.myId, { name: this.name, lastSeen: Date.now() });
+      this.participants.set(this.myId, {
+        name: this.name,
+        lastSeen: Date.now(),
+      });
     }, HEARTBEAT_INTERVAL);
 
     if (typeof window !== "undefined") {
@@ -99,11 +115,23 @@ export class Room {
 
       this.visibilityHandler = () => {
         if (document.visibilityState === "visible") {
-          this.participants.set(this.myId, { name: this.name, lastSeen: Date.now() });
+          this.participants.set(this.myId, {
+            name: this.name,
+            lastSeen: Date.now(),
+          });
+          // The socket may have died while backgrounded; re-establish if needed.
+          this.provider.reconnect();
         }
       };
       document.addEventListener("visibilitychange", this.visibilityHandler);
+
+      this.onlineHandler = () => this.provider.reconnect();
+      window.addEventListener("online", this.onlineHandler);
     }
+  }
+
+  reconnect(): void {
+    this.provider.reconnect();
   }
 
   getSnapshot(): RoomSnapshot {
@@ -183,7 +211,13 @@ export class Room {
         window.removeEventListener("beforeunload", this.beforeUnloadHandler);
       }
       if (this.visibilityHandler) {
-        document.removeEventListener("visibilitychange", this.visibilityHandler);
+        document.removeEventListener(
+          "visibilitychange",
+          this.visibilityHandler,
+        );
+      }
+      if (this.onlineHandler) {
+        window.removeEventListener("online", this.onlineHandler);
       }
     }
     this.provider.publishLeave();

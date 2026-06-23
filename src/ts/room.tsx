@@ -1,7 +1,14 @@
 import { render } from "preact";
 import { useState } from "preact/hooks";
 import { useRoom } from "./lib/useRoom";
-import { getSavedName, saveName, saveLastRoom, getSavedSettings, saveSettings, ROOM_ID_PARAM } from "./lib/identity";
+import {
+  getSavedName,
+  saveName,
+  saveLastRoom,
+  getSavedSettings,
+  saveSettings,
+  ROOM_ID_PARAM,
+} from "./lib/identity";
 import { TopBar } from "./components/TopBar";
 import { CardDeck } from "./components/CardDeck";
 import { ParticipantList } from "./components/ParticipantList";
@@ -13,7 +20,7 @@ const getRoomId = (): string | null => {
 };
 
 const RoomPage = ({ roomId, name }: { roomId: string; name: string }) => {
-  const { snapshot, room } = useRoom(roomId, name);
+  const { snapshot, status, room } = useRoom(roomId, name);
   const myVote = snapshot.votes[snapshot.myId] ?? null;
 
   const handleVote = (value: string) => {
@@ -29,6 +36,8 @@ const RoomPage = ({ roomId, name }: { roomId: string; name: string }) => {
       <TopBar
         roomId={roomId}
         autoReveal={snapshot.autoReveal}
+        status={status}
+        onReconnect={() => room.reconnect()}
         onAutoRevealChange={(on) => {
           room.setAutoReveal(on);
           saveSettings({ ...getSavedSettings(), autoReveal: on });

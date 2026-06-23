@@ -17,23 +17,48 @@ export interface RoomProvider {
   onPeerLeave: ((peerId: string) => void) | null;
   onStatus: ((status: ConnectionStatus) => void) | null;
   publishLeave(): void;
+  reconnect(): void;
+  isConnected(): boolean;
   destroy(): void;
 }
 
 export class MqttProvider implements RoomProvider {
-  private client: mqtt.MqttClient;
+  private client!: mqtt.MqttClient;
   private topic: string;
   private connected = false;
   private participantId: string;
   private retries = 0;
+  private doc: Y.Doc;
+  private destroyed = false;
 
   onPeerLeave: ((peerId: string) => void) | null = null;
   onStatus: ((status: ConnectionStatus) => void) | null = null;
 
   constructor(doc: Y.Doc, roomId: string, participantId: string) {
+    this.doc = doc;
     this.topic = `poker-planning/${roomId}`;
     this.participantId = participantId;
-    this.client = mqtt.connect(BROKER_URL);
+
+    // Broadcast local updates. Attached once; reads this.client dynamically so
+    // it keeps working across reconnect() rebuilds. Updates made while
+    // disconnected are intentionally dropped (peers resync on reconnect).
+    doc.on("update", (update: Uint8Array, origin: unknown) => {
+      if (origin === REMOTE) return;
+      if (!this.connected) return;
+      this.client.publish(`${this.topic}/update`, update as unknown as string);
+    });
+
+    this.connect();
+  }
+
+  /** Build a fresh MQTT client and wire its event handlers. */
+  private connect(): void {
+    this.retries = 0;
+    this.client = mqtt.connect(BROKER_URL, {
+      keepalive: 30,
+      reconnectPeriod: 2000,
+      connectTimeout: 10_000,
+    });
 
     this.client.on("connect", () => {
       this.connected = true;
@@ -62,7 +87,10 @@ export class MqttProvider implements RoomProvider {
     this.client.on("reconnect", () => {
       this.retries++;
       if (this.retries > MAX_RETRIES) {
-        this.client.end();
+        // Stop hammering the broker, but stay recoverable: reconnect() can
+        // rebuild a fresh client (e.g. on tab focus or the manual button).
+        this.client.end(true);
+        this.connected = false;
         this.onStatus?.({ type: "failed" });
         return;
       }
@@ -75,27 +103,39 @@ export class MqttProvider implements RoomProvider {
 
     this.client.on("message", (_topic: string, message: Uint8Array) => {
       if (_topic === `${this.topic}/update`) {
-        Y.applyUpdate(doc, new Uint8Array(message), REMOTE);
+        Y.applyUpdate(this.doc, new Uint8Array(message), REMOTE);
       } else if (_topic === `${this.topic}/sync-request`) {
-        const state = Y.encodeStateAsUpdate(doc);
+        const state = Y.encodeStateAsUpdate(this.doc);
         this.client.publish(
           `${this.topic}/sync-response`,
           state as unknown as string,
         );
       } else if (_topic === `${this.topic}/sync-response`) {
-        Y.applyUpdate(doc, new Uint8Array(message), REMOTE);
+        Y.applyUpdate(this.doc, new Uint8Array(message), REMOTE);
       } else if (_topic === `${this.topic}/leave`) {
         const peerId = new TextDecoder().decode(message);
         if (peerId) this.onPeerLeave?.(peerId);
       }
     });
+  }
 
-    // Broadcast local updates
-    doc.on("update", (update: Uint8Array, origin: unknown) => {
-      if (origin === REMOTE) return;
-      if (!this.connected) return;
-      this.client.publish(`${this.topic}/update`, update as unknown as string);
-    });
+  /**
+   * Re-establish the connection in place, preserving the Yjs doc. Used after a
+   * long sleep/background where the socket died and mqtt.js gave up. Rebuilds
+   * a fresh client rather than relying on reconnect-after-end semantics.
+   */
+  reconnect(): void {
+    if (this.destroyed) return;
+    if (this.connected) return;
+
+    this.client.removeAllListeners();
+    this.client.end(true);
+    this.onStatus?.({ type: "reconnecting" });
+    this.connect();
+  }
+
+  isConnected(): boolean {
+    return this.connected;
   }
 
   publishLeave(): void {
@@ -104,6 +144,7 @@ export class MqttProvider implements RoomProvider {
   }
 
   destroy(): void {
+    this.destroyed = true;
     this.client.end();
   }
 }
