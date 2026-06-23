@@ -12,17 +12,16 @@ interface TopBarProps {
 interface ConnState {
   label: string;
   modifier: "online" | "pending" | "offline";
-  canReconnect: boolean;
 }
 
 const connState = (status: ConnectionStatus): ConnState => {
   switch (status.type) {
     case "connected":
-      return { label: "Connected", modifier: "online", canReconnect: false };
+      return { label: "Connected", modifier: "online" };
     case "reconnecting":
-      return { label: "Connecting…", modifier: "pending", canReconnect: false };
+      return { label: "Connecting…", modifier: "pending" };
     default:
-      return { label: "Offline", modifier: "offline", canReconnect: true };
+      return { label: "Offline", modifier: "offline" };
   }
 };
 
@@ -56,12 +55,14 @@ export const TopBar = ({
         <div class={`conn conn--${conn.modifier}`}>
           <span class="conn__dot" />
           <span class="conn__label">{conn.label}</span>
-          {conn.canReconnect && (
-            <button class="btn btn--small" onClick={onReconnect}>
-              Reconnect
-            </button>
-          )}
         </div>
+        <button
+          class="btn btn--small"
+          onClick={onReconnect}
+          disabled={status.type === "connected"}
+        >
+          Reconnect
+        </button>
         <label class="toggle">
           <input
             type="checkbox"
